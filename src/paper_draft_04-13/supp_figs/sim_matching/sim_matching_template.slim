@@ -1,0 +1,49 @@
+/*Parameters:
+In this file I am running a constant demography simulation. Right at the end of the burn
+in period, I'll introduce an escape mutation which has a high selection coefficient
+ ---------------------------------------------------------------------------------------*/
+
+initialize() {
+	// Define parameters
+	defineConstant("burn_in", 400);
+	defineConstant("sampling_times", c(0, 3, 11, 22) + burn_in);
+	
+	
+	initializeSLiMOptions(nucleotideBased=T); 
+	initializeChromosome(1, 2571, type="H");
+	defineConstant("L", initializeAncestralNucleotides("/net/feder/vol1/home/evromero/2025_hiv_linkage/data/hxb2_nuc_env.txt" ));
+//	defineConstant("L", initializeAncestralNucleotides("/Volumes/feder-vol1/home/evromero/2025_hiv_linkage/data/hxb2_nuc_env.txt" ));
+	
+
+ 	// mutation types indicating, positive, neutral, and deleterious mutations
+ 	initializeMutationTypeNuc("m1", 0.5, "f", 0.05);
+ 	initializeMutationTypeNuc("m2", 0.5, "f", 0.0);
+ 	initializeMutationTypeNuc("m3", 0.5, "f", -0.1);
+
+ 	initializeGenomicElementType("g1", c(m1, m2, m3), c(0.001, 0.33, 0.67),  mmJukesCantor(1e-05));
+
+	// uniform chromosome of length 2571 bp with uniform recombination
+	initializeGenomicElement(g1);
+	initializeRecombinationRate(7.6e-6);
+}
+
+// create a population of 1e4 individuals, start with 5 individuals and grow exponentially for 50 generations
+1 early() { sim.addSubpop("p1", 1e4); }
+
+//2:51 early() {
+//		newSize = asInteger(round(p1.individualCount * 1.164));
+//		p1.setSubpopulationSize(newSize);
+//}
+//
+//// add an escape mutation at the burn in time
+//burn_in early(){
+//	
+//}
+
+
+1:500 late(){
+		if (sim.cycle%50 == 0 | sim.cycle ==1){
+			sim.outputFixedMutations();
+			p1.outputSample(100);
+			}
+		}

@@ -1,0 +1,126 @@
+/*Parameters:
+In this file I am running a constant demography simulation. Right at the end of the burn
+in period, I'll introduce an escape mutation which has a high selection coefficient
+ ---------------------------------------------------------------------------------------*/
+
+initialize() {
+	// Define parameters
+	defineConstant("burn_in", 300);
+	defineConstant("sampling_times", c(-1, 0, 3, 11, 22) + burn_in);
+	defineConstant("last_sample", 11 + burn_in);
+	// The selection coefficient of the escape mutation
+	defineConstant("escape_s", 3.33);
+	defineConstant("allele_vector", c('A', 'T', 'C'));
+	
+	// The number of origins of the simulation
+	defineConstant("num_origins", $num_origins);
+	
+	// The simulation will be restarted after burn in if the number of
+	// originating mutations drops below this number (due to the loss of mutations)
+	defineConstant("min_num_origins", $min_num_origins);
+
+	
+	
+	initializeSLiMOptions(nucleotideBased=T); 
+	initializeChromosome(1, 2571, type="H");
+	defineConstant("L", initializeAncestralNucleotides("/net/feder/vol1/home/evromero/2025_hiv_linkage/data/hxb2_nuc_env.txt" ));
+//	defineConstant("L", initializeAncestralNucleotides("~/Desktop/slim_sandbox/12-11-2025_multi_origin_sweeps/hxb2_nuc_env.txt" ));
+	
+
+ 	// mutation types indicating, positive, neutral, and deleterious mutations
+ 	initializeMutationTypeNuc("m1", 0.5, "f", 0.05);
+ 	initializeMutationTypeNuc("m2", 0.5, "f", 0.0);
+ 	initializeMutationTypeNuc("m3", 0.5, "f", -0.1);
+ 	
+ 	// this type is just the escape mutation and will be added manually after burn in
+ 	initializeMutationTypeNuc("m4", 0.5, "f", escape_s);
+
+ 	initializeGenomicElementType("g1", c(m1, m2, m3), c(0.001, 0.33, 0.67),  mmJukesCantor(1e-05));
+
+	// uniform chromosome of length 2571 bp with uniform recombination
+	initializeGenomicElement(g1);
+	initializeRecombinationRate(7.6e-6);
+
+
+}
+
+// create a population of 1e4 individuals
+1 early() { 
+		// save this run's identifier, used to save and restore
+		defineConstant("simID", getSeed());
+		sim.addSubpop("p1", 1e4); 
+		}
+
+
+// add an escape mutation at the end of burn in
+burn_in late(){
+	// save the state of the simulation
+	sim.outputFull(tempdir() + "slim_" + simID + ".txt");
+	cat("SEEDING MUTATIONS INITIAL");
+
+	// introduce one mutation for each origin
+	origin_sequence = 1:num_origins;
+	for (element in origin_sequence){
+		escape_origin = p1.sampleIndividuals(1);
+		curr_nuc = sample(allele_vector, 1);
+		escape_origin.haplosomes.addNewMutation(m4, escape_s, 1000, nucleotide = curr_nuc);
+	}
+	print("Generation: " + asString(burn_in) + " Number of introduced mutations: " + asString(size(sim.mutationsOfType(m4))));
+}
+
+// make the sweep conditional on establishment (slim recipe 9.2)
+burn_in:last_sample late(){
+	mut = sim.mutationsOfType(m4);
+
+	// check that the mutations are still segregating in the population
+	if (size(mut) >= min_num_origins)
+		{
+
+			if (sum(sim.mutationFrequencies(NULL, mut)) > 0.999 )
+				{
+					cat(simID + ": ESTABLISHED\n");
+					community.deregisterScriptBlock(self);
+				}
+			// If the mutation doesn't establish by the end of the simulation then start again
+			else if (sim.cycle == last_sample & sum(sim.mutationFrequencies(NULL, mut)) < 1)
+				{
+					cat(simID + ": FINISHED NO ESTABLISHMENT – RESTARTING\n");
+					// go back to end of burn in
+					sim.readFromPopulationFile(tempdir() + "slim_" + simID + ".txt");
+					// start a newly seeded run
+					setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+					// re-introduce the sweep mutation
+					origin_sequence = 1:num_origins;
+					for (element in origin_sequence){
+						escape_origin = p1.sampleIndividuals(1);
+						curr_nuc = sample(allele_vector, 1);
+						escape_origin.haplosomes.addNewMutation(m4, escape_s, 1000, nucleotide = curr_nuc);
+					}
+				}
+		}
+	else
+		{
+		cat(simID + ": LOST – RESTARTING\n");
+		// go back to end of burn in
+		sim.readFromPopulationFile(tempdir() + "slim_" + simID + ".txt");
+		// start a newly seeded run
+		setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+		// re-introduce the sweep mutation
+		origin_sequence = 1:num_origins;
+		for (element in origin_sequence){
+			escape_origin = p1.sampleIndividuals(1);
+			curr_nuc = sample(allele_vector, 1);
+			escape_origin.haplosomes.addNewMutation(m4, escape_s, 1000, nucleotide = curr_nuc);
+			}
+		}
+}
+
+
+// burn in for 100 generations, then take samples at trial weeks 0, 1, 4, 8
+sampling_times late(){
+			sim.outputFixedMutations();
+			p1.outputSample(100);
+			print("Generation: " + asString(community.tick) + " Number of distinct mutations: " + asString(size(sim.mutationsOfType(m4))));
+		}

@@ -1,0 +1,72 @@
+import numpy as np
+import sys
+
+
+#Load the modules we will need for the jobs
+# shell.prefix()
+shell.prefix("module load SLiM/5.1;")
+
+#Directory where the simulations will take place
+wrap_dir = '/net/feder/vol1/home/evromero/2025_hiv_linkage/data/slim_simulations/'
+hxb2_file = '/net/feder/vol1/home/evromero/2025_hiv_linkage/data/hxb2_nuc_env.txt'
+python_script_dir = '/net/feder/vol1/home/evromero/2025_hiv_linkage/bin/rule_scripts_simulation/'
+slim_script_dir = '/net/feder/vol1/home/evromero/2025_hiv_linkage/src/paper_draft_04-13/supp_figs/'
+
+#The constants we will use for each run
+DIR_NAME = 'sim_matching/'
+SLIM_SCRIPT_FILE = 'sim_matching_make_scripts.py'
+SLIM_SCRIPT_TEMPLATE = 'sim_matching_template.slim'
+reps = range(100) #number of replicates
+
+#the patterns for the genotype and loci dataframes
+#we only want some of combinations of NE and rho so we will use zip rather than the normal product expand
+full_dir_pattern_gen= wrap_dir + DIR_NAME + "rep_{rep}/analysis/FilteredGenotypes"
+full_dir_pattern_gen = expand(full_dir_pattern_gen, rep = reps)
+
+full_dir_pattern_loc= wrap_dir + DIR_NAME + "rep_{rep}/analysis/FilteredLoci"
+full_dir_pattern_loc = expand(full_dir_pattern_loc, rep = reps)
+
+#Targets are outputs and dependencies are inputs
+rule all:
+    input:
+     full_dir_pattern_gen,
+     full_dir_pattern_loc
+
+#This rule creates the directories and slim scripts for each simulation
+rule set_up_dirs:
+    input:
+        SLIM_SCRIPT_TEMPLATE
+    output: 
+     wrap_dir + DIR_NAME + "rep_{rep}/sim_rep_{rep}.slim"
+    params:
+        in_sim_template = SLIM_SCRIPT_TEMPLATE,
+        out_sim_dir = wrap_dir + DIR_NAME + "rep_{rep}/",
+    script:
+        SLIM_SCRIPT_FILE
+
+#This rule runs the slim script for each simulation
+rule run_slim:
+    input:
+     wrap_dir + DIR_NAME + "rep_{rep}/sim_rep_{rep}.slim"
+
+    output:
+     wrap_dir + DIR_NAME + "rep_{rep}/slim_output.txt"
+
+    shell: "slim " + wrap_dir + DIR_NAME + "rep_{wildcards.rep}/sim_rep_{wildcards.rep}.slim > " + \
+            wrap_dir + DIR_NAME + "rep_{wildcards.rep}/slim_output.txt"
+
+#This rule parses and makes dataframes of the slim output
+rule format_slim_output:
+    input: 
+     wrap_dir + DIR_NAME + "rep_{rep}/slim_output.txt"
+
+    output:
+     wrap_dir + DIR_NAME + "rep_{rep}/analysis/FilteredGenotypes",
+     wrap_dir + DIR_NAME + "rep_{rep}/analysis/FilteredLoci"
+
+    params:
+        out_sim_dir = wrap_dir + DIR_NAME + "rep_{rep}",
+        hxb2_file = hxb2_file
+
+    script:
+        python_script_dir + "format_slim_output.py"

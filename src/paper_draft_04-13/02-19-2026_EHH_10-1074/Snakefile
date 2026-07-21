@@ -1,0 +1,36 @@
+import numpy as np
+
+#This file will run a snakemake workflow for calculating EHH values for 10-1074 Participants
+ruleScriptDir = '/net/feder/vol1/home/evromero/2025_hiv_linkage/src/paper_draft_04-13/02-19-2026_EHH_10-1074/'
+inDataDir = '/net/feder/vol1/home/evromero/2025_hiv_linkage/data/clyde_westfall_2024_final/10-1074/'
+
+#First we will list the parameters we will use in expand
+par_list = ['1HB3', '1HC2', '1HC3', '1HD1', '1HD4K', '1HD5K', '1HD6K', '1HD7K', '1HD9K', '1HD10K', '1HD11K']
+
+#Now we can use expand to create a list of all the directories we will need
+ehh_dir_pattern = '/net/feder/vol1/home/evromero/2025_hiv_linkage/results/paper_draft_04-13/02-19-2026_EHH_10-1074/'
+ehh_dirs = expand(ehh_dir_pattern, participant=par_list)
+
+ehh_files = '/net/feder/vol1/home/evromero/2025_hiv_linkage/results/paper_draft_04-13/02-19-2026_EHH_10-1074/{participant}_ihh_results.csv'
+ehh_files = expand(ehh_files, participant=par_list)
+
+
+
+#Now we can define our rules
+rule all:
+    input:
+        ehh_files
+        
+
+#This rule will calculate iHH for every participant
+rule calculate_ihh_vals:
+    input:
+        inDataDir + '{participant}' + '/885_' + '{participant}' + '_NT_filtered.fasta'
+    conda:
+        'biopyth'
+    params:
+        participant = '{participant}'
+    output:
+        ehh_dir_pattern + '{participant}_ihh_results.csv'
+
+    script: ruleScriptDir + '02-19-2026.py'

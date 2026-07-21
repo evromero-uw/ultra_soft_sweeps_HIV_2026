@@ -1,0 +1,144 @@
+/*Parameters:
+In this file I am running a constant demography simulation. Right at the end of the burn
+in period, I'll introduce an escape mutation which has a high selection coefficient
+ ---------------------------------------------------------------------------------------*/
+
+initialize() {
+	// Define parameters
+	defineConstant("mu", $mu);
+	defineConstant("Ne", 1e4);
+	defineConstant("rho", $rho);
+	defineConstant("burn_in", Ne);
+	defineConstant("escape_s", $selection_coeff);
+
+	// The selection coefficient of the escape mutation
+
+	defineConstant("allele_vector", c('A', 'T', 'C'));
+
+
+	// The number of origins of the simulation
+	defineConstant("num_origins", $num_origins);
+
+	// The simulation will be restarted after burn in if the number of
+	// originating mutations drops below this number (due to the loss of mutations)
+	defineConstant("min_num_origins", $min_num_origins);
+
+
+	initializeSLiMOptions(nucleotideBased=T);
+	initializeChromosome(1, 2571, type="H");
+	defineConstant("L", initializeAncestralNucleotides("/net/feder/vol1/home/evromero/2025_hiv_linkage/data/hxb2_nuc_env.txt" ));
+
+
+ 	// mutation types indicating, positive, neutral, and deleterious mutations
+ 	initializeMutationTypeNuc("m1", 0.5, "f", 0);
+
+ 	// this type is just the escape mutation and will be added manually after burn in
+ 	initializeMutationTypeNuc("m4", 0.5, "f", escape_s);
+
+ 	initializeGenomicElementType("g1", c(m1), c(1),  mmJukesCantor(mu));
+
+	// uniform chromosome of length 2571 bp with uniform recombination
+	initializeGenomicElement(g1);
+	initializeRecombinationRate(rho);
+
+
+}
+
+// create a population of 1e4 individuals
+1 early() {
+		// save this run's identifier, used to save and restore
+		defineConstant("simID", getSeed());
+		sim.addSubpop("p1", Ne);
+		}
+
+
+// add an escape mutation at the end of burn in
+burn_in late(){
+	// save the state of the simulation
+	sim.outputFull(tempdir() + "slim_" + simID + ".txt");
+	cat("SEEDING MUTATIONS INITIAL");
+
+	// introduce one mutation for each origin
+	origin_sequence = 1:num_origins;
+	for (element in origin_sequence){
+		escape_origin = p1.sampleIndividuals(1);
+		curr_nuc = sample(allele_vector, 1);
+		escape_origin.haplosomes.addNewMutation(m4, escape_s, 1000, nucleotide = curr_nuc);
+	}
+}
+
+// make the sweep conditional on establishment (slim recipe 9.2)
+burn_in:100000 late(){
+	mut = sim.mutationsOfType(m4);
+	// count fixed mutations of type m4
+	subs = sim.substitutions;
+	count_m4_subs = sum(subs.mutationType == m4);
+
+	print("Mutation count");
+	print(size(mut));
+
+
+	// check that the mutations are still segregating in the population
+	if (size(mut) >= min_num_origins)
+		{
+			if (sum(sim.mutationFrequencies(NULL, mut)) > 0.99)
+				{
+					print("Freq Establishment");
+					print(sim.mutationFrequencies(NULL, mut));
+					print(sum(sim.mutationFrequencies(NULL, mut)));
+					cat(simID + ": ESTABLISHED\n");
+					community.deregisterScriptBlock(self);
+					defineConstant("END_TICK",  community.tick + 1);
+				}
+
+			else if (size(count_m4_subs) > 1)
+			{
+			print("Sub Establishment");
+			cat(simID + ": ESTABLISHED\n");
+			community.deregisterScriptBlock(self);
+			defineConstant("END_TICK",  community.tick + 1);
+
+			}
+		}
+
+
+	else
+		{
+		cat(simID + ": LOST – RESTARTING\n");
+		// go back to end of burn in
+		sim.readFromPopulationFile(tempdir() + "slim_" + simID + ".txt");
+		// start a newly seeded run
+		setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+		// re-introduce the sweep mutation
+		origin_sequence = 1:num_origins;
+		for (element in origin_sequence){
+			escape_origin = p1.sampleIndividuals(1);
+			curr_nuc = sample(allele_vector, 1);
+			escape_origin.haplosomes.addNewMutation(m4, escape_s, 1000, nucleotide = curr_nuc);
+			}
+		}
+}
+
+
+END_TICK late() {
+	// Output all m4 mutations in the full population before taking the sample.
+	// This #OUT: MS section is placed first so that format_slim_output.py's
+	// time-keyed dict overwrites it with the subsequent F section, keeping
+	// downstream IHH/pi analysis correct while preserving the full m4 counts
+	// in the raw slim_output.txt for exploratory use.
+	sim.outputMutations(sim.mutationsOfType(m4));
+	sim.outputFixedMutations();
+	p1.outputSample(100);
+	print("Simulation Finished");
+   sim.simulationFinished();
+}
+
+
+(burn_in -1) late() {
+	sim.outputMutations(sim.mutationsOfType(m4));
+	sim.outputFixedMutations();
+	p1.outputSample(100);
+}
+
+

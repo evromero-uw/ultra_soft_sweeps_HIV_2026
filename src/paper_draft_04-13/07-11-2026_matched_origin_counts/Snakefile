@@ -1,0 +1,121 @@
+import numpy as np
+import sys
+
+
+#Load the modules we will need for the jobs
+# shell.prefix()
+shell.prefix("module load SLiM/5.1;")
+
+#Directory where the simulations will take place
+wrap_dir = '/net/feder/vol1/home/evromero/2025_hiv_linkage/data/slim_simulations/'
+hxb2_file = '/net/feder/vol1/home/evromero/2025_hiv_linkage/data/hxb2_nuc_env.txt'
+python_script_dir = '/net/feder/vol1/home/evromero/2025_hiv_linkage/bin/rule_scripts_simulation/'
+
+#The constants we will use for each run
+DIR_NAME = '07-11-2026_sims/'
+SLIM_SCRIPT_FILE = '07-11-2026_make_scripts.py'
+SLIM_SCRIPT_TEMPLATE = '07-11-2026_sims.txt'
+reps = range(100) #number of replicates
+WINDOW_SIZE = 60
+WINDOW_STEP = 20
+IHH_CORE_FREQ_THRESH = 0.1
+
+#Make a dictionary with the minimum number of origins for each number of origins
+num_origins_list = [1, 2, 10, 20, 30, 50, 100]
+min_num_origins_list = [1, 2, 5, 10, 20, 40, 80]
+min_origins_dict = dict(zip(num_origins_list, min_num_origins_list))
+
+
+# The patterns for the genotype and loci dataframes
+# We want specific combinations of num_origins and min_num_origins
+full_dir_pattern_gen = []
+full_dir_pattern_loc = []
+full_dir_pattern_pi = []
+full_dir_pattern_ihh = []
+
+for num_origins in num_origins_list:
+    min_num_origins = min_origins_dict[num_origins]
+    for rep in reps:
+        full_dir_pattern_gen.append(wrap_dir + DIR_NAME + f"origins_{num_origins}_min_{min_num_origins}_rep_{rep}/analysis/FilteredGenotypes")
+        full_dir_pattern_loc.append(wrap_dir + DIR_NAME + f"origins_{num_origins}_min_{min_num_origins}_rep_{rep}/analysis/FilteredLoci")
+        full_dir_pattern_pi.append(wrap_dir + DIR_NAME + f"origins_{num_origins}_min_{min_num_origins}_rep_{rep}/origins_{num_origins}_min_{min_num_origins}_rep_{rep}_pi.csv")
+        full_dir_pattern_ihh.append(wrap_dir + DIR_NAME + f"origins_{num_origins}_min_{min_num_origins}_rep_{rep}/origins_{num_origins}_min_{min_num_origins}_rep_{rep}_ihh_results.csv")
+
+#Targets are outputs and dependencies are inputs
+rule all:
+    input:
+     full_dir_pattern_gen,
+     full_dir_pattern_loc,
+     full_dir_pattern_ihh,
+     full_dir_pattern_pi
+
+#This rule creates the directories and slim scripts for each simulation
+rule set_up_dirs:
+    input:
+        SLIM_SCRIPT_TEMPLATE
+    output: 
+     wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/sim_origins_{num_origins}_min_{min_num_origins}_rep_{rep}.slim"
+    params:
+        in_sim_template = SLIM_SCRIPT_TEMPLATE,
+        out_sim_dir = wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/",
+    script:
+        SLIM_SCRIPT_FILE
+
+#This rule runs the slim script for each simulation
+rule run_slim:
+    input:
+     wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/sim_origins_{num_origins}_min_{min_num_origins}_rep_{rep}.slim"
+
+    output:
+     wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/slim_output.txt"
+
+    shell: "slim " + wrap_dir + DIR_NAME + "origins_{wildcards.num_origins}_min_{wildcards.min_num_origins}_rep_{wildcards.rep}/sim_origins_{wildcards.num_origins}_min_{wildcards.min_num_origins}_rep_{wildcards.rep}.slim > " + \
+            wrap_dir + DIR_NAME + "origins_{wildcards.num_origins}_min_{wildcards.min_num_origins}_rep_{wildcards.rep}/slim_output.txt 2> " + \
+            wrap_dir + DIR_NAME + "origins_{wildcards.num_origins}_min_{wildcards.min_num_origins}_rep_{wildcards.rep}/slim_error.txt"
+
+#This rule parses and makes dataframes of the slim output
+rule format_slim_output:
+    input: 
+     wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/slim_output.txt"
+
+    output:
+     wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/analysis/FilteredGenotypes",
+     wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/analysis/FilteredLoci"
+    params:
+        out_sim_dir = wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}",
+        hxb2_file = hxb2_file
+
+
+    script:
+        python_script_dir + "format_slim_output.py"
+
+#This rule calculates nucleotide diversity 
+rule calc_pi_div:
+    input:
+        wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/analysis/FilteredGenotypes"
+    output: 
+        wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/origins_{num_origins}_min_{min_num_origins}_rep_{rep}_pi.csv"
+    params:
+        window_size = WINDOW_SIZE,
+        window_step = WINDOW_STEP,
+        hxb2_file = hxb2_file,
+        num_origins = "{num_origins}",
+        min_num_origins = "{min_num_origins}",
+        rep = "{rep}"
+    script:
+        python_script_dir + "pi_diversity_sim.py"
+
+#This rule calculates the EHH linkage statistic
+rule calc_linkage_ihh:
+    input:
+        wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/analysis/FilteredGenotypes",
+        wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/analysis/FilteredLoci"
+    output:
+        wrap_dir + DIR_NAME + "origins_{num_origins}_min_{min_num_origins}_rep_{rep}/origins_{num_origins}_min_{min_num_origins}_rep_{rep}_ihh_results.csv"
+    params:
+        hxb2_file = hxb2_file,
+        #Set allele frequency threshold to 0 for IHH calculations since we will filter based on core allele frequency
+        allele_freq_thresh = 0,
+        core_freq_thresh = IHH_CORE_FREQ_THRESH
+    script:
+        python_script_dir + "ihh_sim.py"
